@@ -30,41 +30,48 @@
         gathered_filter: '*'
       register: schedule_objects
 
+    # Debug task để xem cấu trúc dữ liệu
+    - name: Debug schedule objects
+      ansible.builtin.debug:
+        var: schedule_objects
+
     - name: Process and filter expiring schedules
       ansible.builtin.set_fact:
         expiring_schedules: >-
           {% set result = [] %}
           {% for schedule in schedule_objects.gathered %}
-            {% if schedule.type == 'non-recurring' and schedule.non_recurring_date_time is defined %}
-              {% for datetime_range in schedule.non_recurring_date_time %}
-                {% set split_range = datetime_range.split('-') %}
-                {% if split_range|length == 2 %}
-                  {% set end_full = split_range[1] %}
-                  {% set end_date = end_full.split('@')[0] %}
-                  {% if end_date >= current_date and end_date <= warning_date %}
-                    {% set schedule_info = schedule | combine({
-                      'start_datetime': split_range[0],
-                      'end_datetime': end_full,
-                      'end_date': end_date,
-                      'end_time': end_full.split('@')[1]
-                    }) %}
-                    {% set _ = result.append(schedule_info) %}
-                  {% endif %}
-                {% endif %}
-              {% endfor %}
-            {% endif %}
+            {% for datetime_range in schedule.non_recurring_date_time %}
+              {% set split_range = datetime_range.split('-') %}
+              {% set end_full = split_range[1] %}
+              {% set end_date = end_full.split('@')[0] %}
+              {% if end_date >= current_date and end_date <= warning_date %}
+                {% set _ = result.append({
+                  'name': schedule.name,
+                  'start_datetime': split_range[0],
+                  'end_datetime': end_full,
+                  'end_date': end_date,
+                  'end_time': end_full.split('@')[1]
+                }) %}
+              {% endif %}
+            {% endfor %}
           {% endfor %}
           {{ result }}
 
-    - name: Display expiring schedules
+    # Debug task để xem kết quả xử lý
+    - name: Debug expiring schedules
+      ansible.builtin.debug:
+        var: expiring_schedules
+
+    - name: Display expiring schedules summary
       ansible.builtin.debug:
         msg: |
-          Found {{ expiring_schedules|length }} expiring schedule(s):
+          Found expiring schedules:
           {% for schedule in expiring_schedules %}
-          - Schedule: {{ schedule.name }}
-            Time Range: {{ schedule.start_datetime }} - {{ schedule.end_datetime }}
+          - Name: {{ schedule.name }}
+            End Date: {{ schedule.end_date }}
+            End Time: {{ schedule.end_time }}
           {% endfor %}
-      when: expiring_schedules is defined
+      when: expiring_schedules | length > 0
 
     - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
@@ -72,30 +79,30 @@
         state: "gathered"
         gathered_filter: '*'
       register: security_rules
-      when: expiring_schedules|length > 0
+      when: expiring_schedules | length > 0
 
     - name: Filter affected security rules
       ansible.builtin.set_fact:
         affected_rules: >-
           {% set result = [] %}
           {% for rule in security_rules.gathered %}
-            {% if rule.schedule in (expiring_schedules | map(attribute='name') | list) %}
-              {% set schedule = (expiring_schedules | selectattr('name', 'equalto', rule.schedule) | first) %}
-              {% set rule_info = {
-                'name': rule.rule_name,
-                'schedule': rule.schedule,
-                'schedule_end': schedule.end_datetime,
-                'action': rule.action,
-                'source_zone': rule.source_zone | join(', '),
-                'destination_zone': rule.destination_zone | join(', '),
-                'source_ip': rule.source_ip | join(', '),
-                'destination_ip': rule.destination_ip | join(', '),
-                'application': rule.application | join(', '),
-                'service': rule.service | join(', '),
-                'description': rule.description | default('No description')
-              } %}
-              {% set _ = result.append(rule_info) %}
-            {% endif %}
+            {% for schedule in expiring_schedules %}
+              {% if rule.schedule == schedule.name %}
+                {% set _ = result.append({
+                  'name': rule.rule_name,
+                  'schedule': schedule.name,
+                  'schedule_end': schedule.end_datetime,
+                  'action': rule.action,
+                  'source_zone': rule.source_zone | join(', '),
+                  'destination_zone': rule.destination_zone | join(', '),
+                  'source_ip': rule.source_ip | join(', '),
+                  'destination_ip': rule.destination_ip | join(', '),
+                  'application': rule.application | join(', '),
+                  'service': rule.service | join(', '),
+                  'description': rule.description | default('No description')
+                }) %}
+              {% endif %}
+            {% endfor %}
           {% endfor %}
           {{ result }}
       when: security_rules is defined and security_rules.gathered is defined
@@ -103,11 +110,10 @@
     - name: Display affected rules
       ansible.builtin.debug:
         msg: |
-          Found {{ affected_rules|length }} rule(s) with expiring schedules:
+          Found rules with expiring schedules:
           {% for rule in affected_rules %}
           Rule: {{ rule.name }}
           - Schedule: {{ rule.schedule }} (expires: {{ rule.schedule_end }})
-          - Description: {{ rule.description }}
           - Action: {{ rule.action }}
           - Source Zone: {{ rule.source_zone }}
           - Destination Zone: {{ rule.destination_zone }}
@@ -116,4 +122,4 @@
           - Application: {{ rule.application }}
           - Service: {{ rule.service }}
           {% endfor %}
-      when: affected_rules is defined and affected_rules|length > 0
+      when: affected_rules | length > 0
