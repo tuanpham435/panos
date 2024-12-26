@@ -1,6 +1,7 @@
 ---
 - name: Check PAN-OS schedule objects and related security rules
   hosts: panorama
+  connection: local
   gather_facts: false
   
   vars:
