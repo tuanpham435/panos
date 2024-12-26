@@ -10,18 +10,12 @@
       username: "{{ username }}"
       password: "{{ password }}"
     warning_days: 7
-    debug_mode: false
       
   tasks:
     - name: Get current date and warning date
       ansible.builtin.set_fact:
         current_date: "{{ lookup('pipe', 'date +%Y/%m/%d') }}"
         warning_date: "{{ lookup('pipe', 'date -d \"+{{ warning_days }} days\" +%Y/%m/%d') }}"
-
-    - name: Debug - Show dates
-      debug:
-        msg: "Current date: {{ current_date }}, Warning date: {{ warning_date }}"
-      when: debug_mode | bool
 
     - name: Gather schedule objects
       paloaltonetworks.panos.panos_schedule_object:
@@ -30,46 +24,32 @@
         gathered_filter: '*'
       register: schedule_objects
 
-    - name: Debug - Show gathered schedules
-      debug:
-        var: schedule_objects
-      when: debug_mode | bool
-
-    - name: Initialize expiring schedules list
+    - name: Process schedules and filter expiring ones
       set_fact:
-        expiring_schedules: []
-
-    - name: Parse schedule end dates
-      set_fact:
-        schedule_info: "{{ schedule_info_temp }}"
-      vars:
-        schedule_date_range: "{{ item.non_recurring_date_time[0].split('-') }}"
-        schedule_info_temp:
-          name: "{{ item.name }}"
-          start_datetime: "{{ schedule_date_range[0] }}"
-          end_datetime: "{{ schedule_date_range[1] }}"
-          end_date: "{{ schedule_date_range[1].split('@')[0] }}"
-      loop: "{{ schedule_objects.gathered }}"
-      when:
-        - item.type == 'non-recurring'
-        - item.non_recurring_date_time is defined
-        - item.non_recurring_date_time | length > 0
-      register: schedule_parse_results
-
-    - name: Filter expiring schedules
-      set_fact:
-        expiring_schedules: "{{ expiring_schedules + [item.ansible_facts.schedule_info] }}"
-      when:
-        - item is not skipped
-        - item.ansible_facts is defined
-        - item.ansible_facts.schedule_info.end_date >= current_date
-        - item.ansible_facts.schedule_info.end_date <= warning_date
-      loop: "{{ schedule_parse_results.results }}"
-
-    - name: Debug - Show expiring schedules
-      debug:
-        var: expiring_schedules
-      when: debug_mode | bool
+        expiring_schedules: |
+          {% set result = [] %}
+          {% for schedule in schedule_objects.gathered %}
+            {% if schedule.type == 'non-recurring' and schedule.non_recurring_date_time is defined %}
+              {% for datetime_range in schedule.non_recurring_date_time %}
+                {% set split_range = datetime_range.split('-') %}
+                {% if split_range|length == 2 %}
+                  {% set end_full = split_range[1] %}
+                  {% set end_date = end_full.split('@')[0] %}
+                  {% if end_date >= current_date and end_date <= warning_date %}
+                    {% set schedule_info = {
+                      'name': schedule.name,
+                      'start_datetime': split_range[0],
+                      'end_datetime': end_full,
+                      'end_date': end_date,
+                      'datetime_range': datetime_range
+                    } %}
+                    {% set _ = result.append(schedule_info) %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endfor %}
+          {{ result }}
 
     - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
@@ -77,52 +57,43 @@
         state: "gathered"
         gathered_filter: '*'
       register: security_rules
-      when: expiring_schedules | length > 0
-
-    - name: Debug - Show gathered rules
-      debug:
-        var: security_rules
-      when: 
-        - debug_mode | bool
-        - security_rules is defined
-
-    - name: Initialize affected rules list
-      set_fact:
-        affected_rules: []
-      when: expiring_schedules | length > 0
+      when: expiring_schedules|from_yaml|length > 0
 
     - name: Find affected rules
       set_fact:
-        affected_rules: "{{ affected_rules + [rule_info] }}"
-      vars:
-        schedule_names: "{{ expiring_schedules | map(attribute='name') | list }}"
-        matching_schedule: "{{ expiring_schedules | selectattr('name', 'equalto', item.schedule) | first }}"
-        rule_info:
-          name: "{{ item.rule_name }}"
-          schedule: "{{ item.schedule }}"
-          schedule_end: "{{ matching_schedule.end_datetime }}"
-          action: "{{ item.action }}"
-          source_zone: "{{ item.source_zone | default(['any']) | join(', ') }}"
-          destination_zone: "{{ item.destination_zone | default(['any']) | join(', ') }}"
-          source_ip: "{{ item.source_ip | default(['any']) | join(', ') }}"
-          destination_ip: "{{ item.destination_ip | default(['any']) | join(', ') }}"
-          application: "{{ item.application | default(['any']) | join(', ') }}"
-          service: "{{ item.service | default(['application-default']) | join(', ') }}"
-          description: "{{ item.description | default('No description') }}"
-      when: 
-        - item.schedule is defined
-        - item.schedule in schedule_names
-      loop: "{{ security_rules.gathered }}"
-      loop_control:
-        label: "Processing rule: {{ item.rule_name }}"
+        affected_rules: |
+          {% set result = [] %}
+          {% for rule in security_rules.gathered %}
+            {% if rule.schedule is defined and rule.schedule in (expiring_schedules|from_yaml|map(attribute='name')|list) %}
+              {% set schedule = (expiring_schedules|from_yaml|selectattr('name', 'equalto', rule.schedule)|first) %}
+              {% set rule_info = {
+                'name': rule.rule_name,
+                'schedule': rule.schedule,
+                'schedule_end': schedule.end_datetime,
+                'schedule_range': schedule.datetime_range,
+                'action': rule.action|default('N/A'),
+                'source_zone': rule.source_zone|default(['any'])|join(', '),
+                'destination_zone': rule.destination_zone|default(['any'])|join(', '),
+                'source_ip': rule.source_ip|default(['any'])|join(', '),
+                'destination_ip': rule.destination_ip|default(['any'])|join(', '),
+                'application': rule.application|default(['any'])|join(', '),
+                'service': rule.service|default(['application-default'])|join(', '),
+                'description': rule.description|default('')
+              } %}
+              {% set _ = result.append(rule_info) %}
+            {% endif %}
+          {% endfor %}
+          {{ result }}
+      when: security_rules.gathered is defined and expiring_schedules|from_yaml|length > 0
 
     - name: Show final results
       debug:
         msg: |
           === Rules with expiring schedules ===
-          {% for rule in affected_rules %}
+          {% for rule in affected_rules|from_yaml %}
           Rule: {{ rule.name }}
-          Schedule: {{ rule.schedule }} (expires: {{ rule.schedule_end }})
+          Schedule: {{ rule.schedule }}
+          Schedule Range: {{ rule.schedule_range }}
           Action: {{ rule.action }}
           Source Zone: {{ rule.source_zone }}
           Destination Zone: {{ rule.destination_zone }}
@@ -130,12 +101,14 @@
           Destination IP: {{ rule.destination_ip }}
           Application: {{ rule.application }}
           Service: {{ rule.service }}
+          {%- if rule.description %}
           Description: {{ rule.description }}
-          ----------------------------------------
+          {%- endif %}
+
           {% endfor %}
-      when: affected_rules | length > 0
+      when: affected_rules is defined and affected_rules|from_yaml|length > 0
 
     - name: Show no results message
       debug:
         msg: "No security rules found with expiring schedules"
-      when: affected_rules | length == 0
+      when: not affected_rules is defined or affected_rules|from_yaml|length == 0
