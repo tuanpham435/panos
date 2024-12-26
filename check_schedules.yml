@@ -10,7 +10,6 @@
       username: "{{ username }}"
       password: "{{ password }}"
     warning_days: 7
-    debug_mode: true  # Thêm mode debug để dễ troubleshoot
       
   tasks:
     - name: Get current date and warning date
@@ -18,26 +17,12 @@
         current_date: "{{ lookup('pipe', 'date +%Y/%m/%d') }}"
         warning_date: "{{ lookup('pipe', 'date -d \"+{{ warning_days }} days\" +%Y/%m/%d') }}"
 
-    - name: Debug - Show dates
-      debug:
-        msg: "Current date: {{ current_date }}, Warning date: {{ warning_date }}"
-      when: debug_mode | bool
-
     - name: Gather schedule objects
       paloaltonetworks.panos.panos_schedule_object:
         provider: "{{ provider }}"
         state: "gathered"
         gathered_filter: '*'
       register: schedule_objects
-
-    - name: Debug - Show gathered schedules
-      debug:
-        var: schedule_objects
-      when: debug_mode | bool
-
-    - name: Initialize expiring schedules list
-      set_fact:
-        expiring_schedules: []
 
     - name: Parse schedule end dates
       set_fact:
@@ -58,7 +43,7 @@
 
     - name: Filter expiring schedules
       set_fact:
-        expiring_schedules: "{{ expiring_schedules + [item.ansible_facts.schedule_info] }}"
+        expiring_schedules: "{{ expiring_schedules | default([]) + [item.ansible_facts.schedule_info] }}"
       when:
         - item is not skipped
         - item.ansible_facts is defined
@@ -66,34 +51,17 @@
         - item.ansible_facts.schedule_info.end_date <= warning_date
       loop: "{{ schedule_parse_results.results }}"
 
-    - name: Debug - Show expiring schedules
-      debug:
-        var: expiring_schedules
-      when: debug_mode | bool
-
     - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
         provider: "{{ provider }}"
         state: "gathered"
         gathered_filter: '*'
       register: security_rules
-      when: expiring_schedules | length > 0
-
-    - name: Debug - Show gathered rules
-      debug:
-        var: security_rules
-      when: 
-        - debug_mode | bool
-        - security_rules is defined
-
-    - name: Initialize affected rules list
-      set_fact:
-        affected_rules: []
-      when: expiring_schedules | length > 0
+      when: expiring_schedules is defined and expiring_schedules | length > 0
 
     - name: Find affected rules
       set_fact:
-        affected_rules: "{{ affected_rules + [rule_info] }}"
+        affected_rules: "{{ affected_rules | default([]) + [rule_info] }}"
       vars:
         schedule_names: "{{ expiring_schedules | map(attribute='name') | list }}"
         matching_schedule: "{{ expiring_schedules | selectattr('name', 'equalto', item.schedule) | first }}"
@@ -116,7 +84,7 @@
       loop_control:
         label: "Processing rule: {{ item.rule_name }}"
 
-    - name: Show final results
+    - name: Show results
       debug:
         msg: |
           === Rules with expiring schedules ===
@@ -130,12 +98,9 @@
           Destination IP: {{ rule.destination_ip }}
           Application: {{ rule.application }}
           Service: {{ rule.service }}
+          {% if rule.description != 'No description' %}
           Description: {{ rule.description }}
+          {% endif %}
           ----------------------------------------
           {% endfor %}
-      when: affected_rules | length > 0
-
-    - name: Show no results message
-      debug:
-        msg: "No security rules found with expiring schedules"
-      when: affected_rules | length == 0
+      when: affected_rules is defined and affected_rules | length > 0
