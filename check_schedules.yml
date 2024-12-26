@@ -88,11 +88,7 @@
 
     - name: Show final results
       debug:
-        msg: >
-          Rule: {{ item.name }} Schedule: {{ item.schedule }} Schedule Range: {{ item.schedule_range }}
-            Action: {{ item.action }} | From: {{ item.source_zone }} to {{ item.destination_zone }}
-            Source IP: {{ item.source_ip }} | Destination IP: {{ item.destination_ip }}
-            Application: {{ item.application }} | Service: {{ item.service }}
+        msg: "Rule: {{ item.name }} | Schedule: {{ item.schedule }} | Range: {{ item.schedule_range }} | Action: {{ item.action }} | From: {{ item.source_zone }} to {{ item.destination_zone }} | Source IP: {{ item.source_ip }} | Destination IP: {{ item.destination_ip }} | Application: {{ item.application }} | Service: {{ item.service }}"
       loop: "{{ affected_rules|from_yaml }}"
       loop_control:
         label: "Rule: {{ item.name }}"
