@@ -23,6 +23,13 @@
           Current date: {{ current_date }}
           Warning date: {{ warning_date }}
 
+    - name: Gather all schedule objects
+      paloaltonetworks.panos.panos_schedule_object:
+        provider: "{{ provider }}"
+        state: "gathered"
+        gathered_filter: '*'
+      register: schedule_objects
+
     - name: Process and filter expiring schedules
       ansible.builtin.set_fact:
         expiring_schedules: >-
@@ -51,8 +58,21 @@
 
     - name: Display expiring schedules
       ansible.builtin.debug:
-        var: expiring_schedules
+        msg: |
+          Found {{ expiring_schedules|length }} expiring schedule(s):
+          {% for schedule in expiring_schedules %}
+          - Schedule: {{ schedule.name }}
+            Time Range: {{ schedule.start_datetime }} - {{ schedule.end_datetime }}
+          {% endfor %}
       when: expiring_schedules is defined
+
+    - name: Gather security rules
+      paloaltonetworks.panos.panos_security_rule:
+        provider: "{{ provider }}"
+        state: "gathered"
+        gathered_filter: '*'
+      register: security_rules
+      when: expiring_schedules|length > 0
 
     - name: Filter affected security rules
       ansible.builtin.set_fact:
@@ -78,7 +98,7 @@
             {% endif %}
           {% endfor %}
           {{ result }}
-      when: expiring_schedules is defined and expiring_schedules|length > 0
+      when: security_rules is defined and security_rules.gathered is defined
 
     - name: Display affected rules
       ansible.builtin.debug:
