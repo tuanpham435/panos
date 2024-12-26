@@ -10,6 +10,7 @@
       username: "{{ username }}"
       password: "{{ password }}"
     warning_days: 7
+    debug_mode: true  # Thêm mode debug để dễ troubleshoot
       
   tasks:
     - name: Get current date and warning date
@@ -17,61 +18,58 @@
         current_date: "{{ lookup('pipe', 'date +%Y/%m/%d') }}"
         warning_date: "{{ lookup('pipe', 'date -d \"+{{ warning_days }} days\" +%Y/%m/%d') }}"
 
-    - name: Display dates
-      ansible.builtin.debug:
-        msg: |
-          Current date: {{ current_date }}
-          Warning date: {{ warning_date }}
+    - name: Debug - Show dates
+      debug:
+        msg: "Current date: {{ current_date }}, Warning date: {{ warning_date }}"
+      when: debug_mode | bool
 
-    - name: Gather all schedule objects
+    - name: Gather schedule objects
       paloaltonetworks.panos.panos_schedule_object:
         provider: "{{ provider }}"
         state: "gathered"
         gathered_filter: '*'
       register: schedule_objects
 
-    # Debug task để xem cấu trúc dữ liệu
-    - name: Debug schedule objects
-      ansible.builtin.debug:
+    - name: Debug - Show gathered schedules
+      debug:
         var: schedule_objects
+      when: debug_mode | bool
 
-    - name: Process and filter expiring schedules
-      ansible.builtin.set_fact:
-        expiring_schedules: >-
-          {% set result = [] %}
-          {% for schedule in schedule_objects.gathered %}
-            {% for datetime_range in schedule.non_recurring_date_time %}
-              {% set split_range = datetime_range.split('-') %}
-              {% set end_full = split_range[1] %}
-              {% set end_date = end_full.split('@')[0] %}
-              {% if end_date >= current_date and end_date <= warning_date %}
-                {% set _ = result.append({
-                  'name': schedule.name,
-                  'start_datetime': split_range[0],
-                  'end_datetime': end_full,
-                  'end_date': end_date,
-                  'end_time': end_full.split('@')[1]
-                }) %}
-              {% endif %}
-            {% endfor %}
-          {% endfor %}
-          {{ result }}
+    - name: Initialize expiring schedules list
+      set_fact:
+        expiring_schedules: []
 
-    # Debug task để xem kết quả xử lý
-    - name: Debug expiring schedules
-      ansible.builtin.debug:
+    - name: Parse schedule end dates
+      set_fact:
+        schedule_info: "{{ schedule_info_temp }}"
+      vars:
+        schedule_date_range: "{{ item.non_recurring_date_time[0].split('-') }}"
+        schedule_info_temp:
+          name: "{{ item.name }}"
+          start_datetime: "{{ schedule_date_range[0] }}"
+          end_datetime: "{{ schedule_date_range[1] }}"
+          end_date: "{{ schedule_date_range[1].split('@')[0] }}"
+      loop: "{{ schedule_objects.gathered }}"
+      when:
+        - item.type == 'non-recurring'
+        - item.non_recurring_date_time is defined
+        - item.non_recurring_date_time | length > 0
+      register: schedule_parse_results
+
+    - name: Filter expiring schedules
+      set_fact:
+        expiring_schedules: "{{ expiring_schedules + [item.ansible_facts.schedule_info] }}"
+      when:
+        - item is not skipped
+        - item.ansible_facts is defined
+        - item.ansible_facts.schedule_info.end_date >= current_date
+        - item.ansible_facts.schedule_info.end_date <= warning_date
+      loop: "{{ schedule_parse_results.results }}"
+
+    - name: Debug - Show expiring schedules
+      debug:
         var: expiring_schedules
-
-    - name: Display expiring schedules summary
-      ansible.builtin.debug:
-        msg: |
-          Found expiring schedules:
-          {% for schedule in expiring_schedules %}
-          - Name: {{ schedule.name }}
-            End Date: {{ schedule.end_date }}
-            End Time: {{ schedule.end_time }}
-          {% endfor %}
-      when: expiring_schedules | length > 0
+      when: debug_mode | bool
 
     - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
@@ -81,45 +79,63 @@
       register: security_rules
       when: expiring_schedules | length > 0
 
-    - name: Filter affected security rules
-      ansible.builtin.set_fact:
-        affected_rules: >-
-          {% set result = [] %}
-          {% for rule in security_rules.gathered %}
-            {% for schedule in expiring_schedules %}
-              {% if rule.schedule == schedule.name %}
-                {% set _ = result.append({
-                  'name': rule.rule_name,
-                  'schedule': schedule.name,
-                  'schedule_end': schedule.end_datetime,
-                  'action': rule.action,
-                  'source_zone': rule.source_zone | join(', '),
-                  'destination_zone': rule.destination_zone | join(', '),
-                  'source_ip': rule.source_ip | join(', '),
-                  'destination_ip': rule.destination_ip | join(', '),
-                  'application': rule.application | join(', '),
-                  'service': rule.service | join(', '),
-                  'description': rule.description | default('No description')
-                }) %}
-              {% endif %}
-            {% endfor %}
-          {% endfor %}
-          {{ result }}
-      when: security_rules is defined and security_rules.gathered is defined
+    - name: Debug - Show gathered rules
+      debug:
+        var: security_rules
+      when: 
+        - debug_mode | bool
+        - security_rules is defined
 
-    - name: Display affected rules
-      ansible.builtin.debug:
+    - name: Initialize affected rules list
+      set_fact:
+        affected_rules: []
+      when: expiring_schedules | length > 0
+
+    - name: Find affected rules
+      set_fact:
+        affected_rules: "{{ affected_rules + [rule_info] }}"
+      vars:
+        schedule_names: "{{ expiring_schedules | map(attribute='name') | list }}"
+        matching_schedule: "{{ expiring_schedules | selectattr('name', 'equalto', item.schedule) | first }}"
+        rule_info:
+          name: "{{ item.rule_name }}"
+          schedule: "{{ item.schedule }}"
+          schedule_end: "{{ matching_schedule.end_datetime }}"
+          action: "{{ item.action }}"
+          source_zone: "{{ item.source_zone | default(['any']) | join(', ') }}"
+          destination_zone: "{{ item.destination_zone | default(['any']) | join(', ') }}"
+          source_ip: "{{ item.source_ip | default(['any']) | join(', ') }}"
+          destination_ip: "{{ item.destination_ip | default(['any']) | join(', ') }}"
+          application: "{{ item.application | default(['any']) | join(', ') }}"
+          service: "{{ item.service | default(['application-default']) | join(', ') }}"
+          description: "{{ item.description | default('No description') }}"
+      when: 
+        - item.schedule is defined
+        - item.schedule in schedule_names
+      loop: "{{ security_rules.gathered }}"
+      loop_control:
+        label: "Processing rule: {{ item.rule_name }}"
+
+    - name: Show final results
+      debug:
         msg: |
-          Found rules with expiring schedules:
+          === Rules with expiring schedules ===
           {% for rule in affected_rules %}
           Rule: {{ rule.name }}
-          - Schedule: {{ rule.schedule }} (expires: {{ rule.schedule_end }})
-          - Action: {{ rule.action }}
-          - Source Zone: {{ rule.source_zone }}
-          - Destination Zone: {{ rule.destination_zone }}
-          - Source IP: {{ rule.source_ip }}
-          - Destination IP: {{ rule.destination_ip }}
-          - Application: {{ rule.application }}
-          - Service: {{ rule.service }}
+          Schedule: {{ rule.schedule }} (expires: {{ rule.schedule_end }})
+          Action: {{ rule.action }}
+          Source Zone: {{ rule.source_zone }}
+          Destination Zone: {{ rule.destination_zone }}
+          Source IP: {{ rule.source_ip }}
+          Destination IP: {{ rule.destination_ip }}
+          Application: {{ rule.application }}
+          Service: {{ rule.service }}
+          Description: {{ rule.description }}
+          ----------------------------------------
           {% endfor %}
       when: affected_rules | length > 0
+
+    - name: Show no results message
+      debug:
+        msg: "No security rules found with expiring schedules"
+      when: affected_rules | length == 0
