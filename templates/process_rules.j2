@@ -1,0 +1,27 @@
+{% set result = {} %}
+{% for schedule in expiring_schedules %}
+  {% set schedule_rules = [] %}
+  {% for rule in security_rules.gathered %}
+    {% if rule.schedule == schedule.name %}
+      {% set rule_info = {
+        'name': rule.name,
+        'description': rule.description|default('No description'),
+        'source_zone': rule.source_zone|join(', '),
+        'destination_zone': rule.destination_zone|join(', '),
+        'source_ip': rule.source_ip|join(', '),
+        'destination_ip': rule.destination_ip|join(', '),
+        'application': rule.application|join(', '),
+        'action': rule.action,
+        'disabled': rule.disabled|default(false)
+      } %}
+      {% set _ = schedule_rules.append(rule_info) %}
+    {% endif %}
+  {% endfor %}
+  {% if schedule_rules|length > 0 %}
+    {% set _ = result.update({schedule.name: {
+      'schedule_info': schedule,
+      'rules': schedule_rules
+    }}) %}
+  {% endif %}
+{% endfor %}
+{{ result }}

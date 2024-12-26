@@ -9,8 +9,14 @@
       ip_address: "{{ ip_address }}"
       username: "{{ username }}"
       password: "{{ password }}"
+    warning_days: 7
       
   tasks:
+    - name: Get current date and warning date
+      ansible.builtin.set_fact:
+        current_date: "{{ lookup('pipe', 'date +%Y/%m/%d') }}"
+        warning_date: "{{ lookup('pipe', 'date -d \"+{{ warning_days }} days\" +%Y/%m/%d') }}"
+
     - name: Gather all schedule objects
       paloaltonetworks.panos.panos_schedule_object:
         provider: "{{ provider }}"
@@ -18,44 +24,24 @@
         gathered_filter: '*'
       register: schedule_objects
 
+    - name: Process and filter expiring schedules
+      ansible.builtin.set_fact:
+        expiring_schedules: "{{ lookup('template', 'templates/process_schedules.j2') }}"
+
+    - name: Get expiring schedule names
+      ansible.builtin.set_fact:
+        expiring_schedule_names: "{{ expiring_schedules | map(attribute='name') | list }}"
+      when: expiring_schedules|length > 0
+
     - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
         provider: "{{ provider }}"
         state: "gathered"
         gathered_filter: '*'
       register: security_rules
+      when: expiring_schedule_names is defined
 
-    - name: Display Schedule
-      ansible.builtin.debug:
-        var: schedule_objects.gathered
-
-    - name: Display Security Rule
-      ansible.builtin.debug:
-        var: security_rules.gathered
-
-    # - name: Send email notification
-    #   community.general.mail:
-    #     host: smtp.example.com
-    #     port: 587
-    #     username: "{{ smtp_user }}"
-    #     password: "{{ smtp_pass }}"
-    #     to: "{{ admin_email }}"
-    #     subject: "PAN-OS Security Rules with Expiring Schedules"
-    #     body: |
-    #       The following schedule objects are expiring within 7 days:
-          
-    #       {% for schedule in expiring_schedules %}
-    #       Schedule Object:
-    #       - Name: {{ schedule.name }}
-    #         End Date: {{ (schedule.non_recurring_date_time.split('-')[1]).split('@')[0] }}
-          
-    #       Affected Security Rules:
-    #       {% for rule in affected_rules %}
-    #       {% if rule.schedule == schedule.name %}
-    #       - Rule Name: {{ rule.name }}
-    #         Description: {{ rule.description | default('No description') }}
-    #       {% endif %}
-    #       {% endfor %}
-          
-    #       {% endfor %}
-    #   when: affected_rules is defined and affected_rules | length > 0
+    - name: Filter and organize affected rules
+      ansible.builtin.set_fact:
+        affected_rules_by_schedule: "{{ lookup('template', 'templates/process_rules.j2') }}"
+      when: security_rules is defined and security_rules.gathered|length > 0
