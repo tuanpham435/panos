@@ -24,6 +24,12 @@
         gathered_filter: '*'
       register: schedule_objects
 
+    # Debug schedule objects
+    - name: Debug schedule objects
+      debug:
+        var: schedule_objects
+        verbosity: 1
+
     - name: Parse schedule end dates
       set_fact:
         schedule_info: "{{ schedule_info_temp }}"
@@ -51,6 +57,12 @@
         - item.ansible_facts.schedule_info.end_date <= warning_date
       loop: "{{ schedule_parse_results.results }}"
 
+    # Debug expiring schedules
+    - name: Debug expiring schedules
+      debug:
+        var: expiring_schedules
+        verbosity: 1
+
     - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
         provider: "{{ provider }}"
@@ -58,6 +70,12 @@
         gathered_filter: '*'
       register: security_rules
       when: expiring_schedules is defined and expiring_schedules | length > 0
+
+    # Debug security rules
+    - name: Debug security rules
+      debug:
+        msg: "Processing rules with schedules: {{ security_rules.gathered | selectattr('schedule', 'defined') | map(attribute='rule_name') | list }}"
+        verbosity: 1
 
     - name: Find affected rules
       set_fact:
@@ -77,10 +95,8 @@
           application: "{{ item.application | default(['any']) | join(', ') }}"
           service: "{{ item.service | default(['application-default']) | join(', ') }}"
           description: "{{ item.description | default('No description') }}"
-      when: 
-        - item.schedule is defined
-        - item.schedule in schedule_names
-      loop: "{{ security_rules.gathered }}"
+      loop: "{{ security_rules.gathered | selectattr('schedule', 'defined') | list }}"
+      when: item.schedule in schedule_names
       loop_control:
         label: "Processing rule: {{ item.rule_name }}"
 
