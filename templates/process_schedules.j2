@@ -1,22 +1,26 @@
+{# Store results in a variable #}
 {% set result = [] %}
-{% for schedule in schedule_objects.gathered %}
-  {% if schedule.type == 'non-recurring' and schedule.non_recurring_date_time is defined %}
-    {% for datetime_range in schedule.non_recurring_date_time %}
-      {% set split_range = datetime_range.split('-') %}
-      {% if split_range|length == 2 %}
-        {% set end_full = split_range[1] %}
-        {% set end_date = end_full.split('@')[0] %}
-        {% if end_date >= current_date and end_date <= warning_date %}
-          {% set schedule_info = schedule | combine({
-            'start_datetime': split_range[0],
-            'end_datetime': end_full,
-            'end_date': end_date,
-            'end_time': end_full.split('@')[1]
-          }) %}
-          {% set _ = result.append(schedule_info) %}
+{% if schedule_objects.gathered is defined %}
+  {% for schedule in schedule_objects.gathered %}
+    {% if schedule.type == 'non-recurring' and schedule.non_recurring_date_time is defined and schedule.non_recurring_date_time %}
+      {% for datetime_range in schedule.non_recurring_date_time %}
+        {% set split_range = datetime_range.split('-') %}
+        {% if split_range | length == 2 %}
+          {% set end_full = split_range[1] %}
+          {% set end_date = end_full.split('@')[0] %}
+          {% if end_date >= current_date and end_date <= warning_date %}
+            {% set schedule_info = {
+              'name': schedule.name,
+              'start_datetime': split_range[0],
+              'end_datetime': end_full,
+              'end_date': end_date,
+              'end_time': end_full.split('@')[1]
+            } %}
+            {% set _ = result.append(schedule_info) %}
+          {% endif %}
         {% endif %}
-      {% endif %}
-    {% endfor %}
-  {% endif %}
-{% endfor %}
-{{ result }}
+      {% endfor %}
+    {% endif %}
+  {% endfor %}
+{% endif %}
+{% set vars = namespace(result=result) %}

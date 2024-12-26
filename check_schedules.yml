@@ -17,6 +17,12 @@
         current_date: "{{ lookup('pipe', 'date +%Y/%m/%d') }}"
         warning_date: "{{ lookup('pipe', 'date -d \"+{{ warning_days }} days\" +%Y/%m/%d') }}"
 
+    - name: Display dates
+      ansible.builtin.debug:
+        msg: |
+          Current date: {{ current_date }}
+          Warning date: {{ warning_date }}
+
     - name: Gather all schedule objects
       paloaltonetworks.panos.panos_schedule_object:
         provider: "{{ provider }}"
@@ -25,13 +31,26 @@
       register: schedule_objects
 
     - name: Process and filter expiring schedules
+      ansible.builtin.template:
+        src: templates/process_schedules.j2
+        dest: /dev/null
+      register: expiring_schedules_result
+      check_mode: yes
+
+    - name: Set expiring schedules fact
       ansible.builtin.set_fact:
-        expiring_schedules: "{{ lookup('template', 'templates/process_schedules.j2') }}"
+        expiring_schedules: "{{ expiring_schedules_result.vars.result }}"
+      when: expiring_schedules_result.vars.result is defined
+
+    - name: Display expiring schedules
+      ansible.builtin.debug:
+        var: expiring_schedules
+      when: expiring_schedules is defined
 
     - name: Get expiring schedule names
       ansible.builtin.set_fact:
         expiring_schedule_names: "{{ expiring_schedules | map(attribute='name') | list }}"
-      when: expiring_schedules|length > 0
+      when: expiring_schedules is defined and expiring_schedules | length > 0
 
     - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
@@ -39,9 +58,22 @@
         state: "gathered"
         gathered_filter: '*'
       register: security_rules
-      when: expiring_schedule_names is defined
+      when: expiring_schedule_names is defined and expiring_schedule_names | length > 0
 
-    - name: Filter and organize affected rules
+    - name: Process affected rules
+      ansible.builtin.template:
+        src: templates/process_rules.j2
+        dest: /dev/null
+      register: affected_rules_result
+      check_mode: yes
+      when: security_rules is defined
+
+    - name: Set affected rules fact
       ansible.builtin.set_fact:
-        affected_rules_by_schedule: "{{ lookup('template', 'templates/process_rules.j2') }}"
-      when: security_rules is defined and security_rules.gathered|length > 0
+        affected_rules_by_schedule: "{{ affected_rules_result.vars.result }}"
+      when: affected_rules_result.vars is defined and affected_rules_result.vars.result is defined
+
+    - name: Display affected rules
+      ansible.builtin.debug:
+        var: affected_rules_by_schedule
+      when: affected_rules_by_schedule is defined
