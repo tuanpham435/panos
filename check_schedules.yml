@@ -15,6 +15,7 @@
       paloaltonetworks.panos.panos_schedule_object:
         provider: "{{ provider }}"
         state: "gathered"
+        gathered_filter: '*'
       register: schedule_objects
 
     - name: Filter and check expiring schedules
