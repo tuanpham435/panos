@@ -23,57 +23,77 @@
           Current date: {{ current_date }}
           Warning date: {{ warning_date }}
 
-    - name: Gather all schedule objects
-      paloaltonetworks.panos.panos_schedule_object:
-        provider: "{{ provider }}"
-        state: "gathered"
-        gathered_filter: '*'
-      register: schedule_objects
-
     - name: Process and filter expiring schedules
-      ansible.builtin.template:
-        src: templates/process_schedules.j2
-        dest: /dev/null
-      register: expiring_schedules_result
-      check_mode: yes
-
-    - name: Set expiring schedules fact
       ansible.builtin.set_fact:
-        expiring_schedules: "{{ expiring_schedules_result.vars.result }}"
-      when: expiring_schedules_result.vars.result is defined
+        expiring_schedules: >-
+          {% set result = [] %}
+          {% for schedule in schedule_objects.gathered %}
+            {% if schedule.type == 'non-recurring' and schedule.non_recurring_date_time is defined %}
+              {% for datetime_range in schedule.non_recurring_date_time %}
+                {% set split_range = datetime_range.split('-') %}
+                {% if split_range|length == 2 %}
+                  {% set end_full = split_range[1] %}
+                  {% set end_date = end_full.split('@')[0] %}
+                  {% if end_date >= current_date and end_date <= warning_date %}
+                    {% set schedule_info = schedule | combine({
+                      'start_datetime': split_range[0],
+                      'end_datetime': end_full,
+                      'end_date': end_date,
+                      'end_time': end_full.split('@')[1]
+                    }) %}
+                    {% set _ = result.append(schedule_info) %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endfor %}
+          {{ result }}
 
     - name: Display expiring schedules
       ansible.builtin.debug:
-        var: schedule_objects
-      when: schedule_objects is defined
+        var: expiring_schedules
+      when: expiring_schedules is defined
 
-    - name: Get expiring schedule names
+    - name: Filter affected security rules
       ansible.builtin.set_fact:
-        expiring_schedule_names: "{{ expiring_schedules | map(attribute='name') | list }}"
-      when: expiring_schedules is defined and expiring_schedules | length > 0
-
-    - name: Gather security rules
-      paloaltonetworks.panos.panos_security_rule:
-        provider: "{{ provider }}"
-        state: "gathered"
-        gathered_filter: '*'
-      register: security_rules
-      # when: expiring_schedule_names is defined and expiring_schedule_names | length > 0
-
-    - name: Process affected rules
-      ansible.builtin.template:
-        src: templates/process_rules.j2
-        dest: /dev/null
-      register: affected_rules_result
-      check_mode: yes
-      when: security_rules is defined
-
-    - name: Set affected rules fact
-      ansible.builtin.set_fact:
-        affected_rules_by_schedule: "{{ affected_rules_result.vars.result }}"
-      when: affected_rules_result.vars is defined and affected_rules_result.vars.result is defined
+        affected_rules: >-
+          {% set result = [] %}
+          {% for rule in security_rules.gathered %}
+            {% if rule.schedule in (expiring_schedules | map(attribute='name') | list) %}
+              {% set schedule = (expiring_schedules | selectattr('name', 'equalto', rule.schedule) | first) %}
+              {% set rule_info = {
+                'name': rule.rule_name,
+                'schedule': rule.schedule,
+                'schedule_end': schedule.end_datetime,
+                'action': rule.action,
+                'source_zone': rule.source_zone | join(', '),
+                'destination_zone': rule.destination_zone | join(', '),
+                'source_ip': rule.source_ip | join(', '),
+                'destination_ip': rule.destination_ip | join(', '),
+                'application': rule.application | join(', '),
+                'service': rule.service | join(', '),
+                'description': rule.description | default('No description')
+              } %}
+              {% set _ = result.append(rule_info) %}
+            {% endif %}
+          {% endfor %}
+          {{ result }}
+      when: expiring_schedules is defined and expiring_schedules|length > 0
 
     - name: Display affected rules
       ansible.builtin.debug:
-        var: security_rules
-      when: security_rules is defined
+        msg: |
+          Found {{ affected_rules|length }} rule(s) with expiring schedules:
+          {% for rule in affected_rules %}
+          Rule: {{ rule.name }}
+          - Schedule: {{ rule.schedule }} (expires: {{ rule.schedule_end }})
+          - Description: {{ rule.description }}
+          - Action: {{ rule.action }}
+          - Source Zone: {{ rule.source_zone }}
+          - Destination Zone: {{ rule.destination_zone }}
+          - Source IP: {{ rule.source_ip }}
+          - Destination IP: {{ rule.destination_ip }}
+          - Application: {{ rule.application }}
+          - Service: {{ rule.service }}
+          {% endfor %}
+      when: affected_rules is defined and affected_rules|length > 0
