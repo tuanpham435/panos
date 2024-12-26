@@ -1,0 +1,78 @@
+---
+- name: Check PAN-OS schedule objects and related security rules
+  hosts: panorama
+  gather_facts: false
+  
+  vars:
+    provider:
+      ip_address: "{{ ip_address }}"
+      username: "{{ username }}"
+      password: "{{ password }}"
+      
+  tasks:
+    - name: Gather all schedule objects
+      paloaltonetworks.panos.panos_schedule_object:
+        provider: "{{ provider }}"
+        state: "gathered"
+      register: schedule_objects
+
+    - name: Filter and check expiring schedules
+      vars:
+        current_date: "{{ ansible_date_time.iso8601 }}"
+      ansible.builtin.set_fact:
+        expiring_schedules: >-
+          {{ schedule_objects.gathered | selectattr('type', 'equalto', 'non-recurring') | 
+             selectattr('non_recurring_date_time', 'defined') | 
+             select('regex', '[0-9]{4}/[0-9]{2}/[0-9]{2}@[0-9]{2}:[0-9]{2}-([0-9]{4}/[0-9]{2}/[0-9]{2})@[0-9]{2}:[0-9]{2}') |
+             list }}
+
+    - name: Get expiring schedule names
+      ansible.builtin.set_fact:
+        expiring_schedule_names: "{{ expiring_schedules | map(attribute='name') | list }}"
+
+    - name: Gather security rules
+      paloaltonetworks.panos.panos_security_rule:
+        provider: "{{ provider }}"
+        state: "gathered"
+      register: security_rules
+
+    - name: Filter security rules using expiring schedules
+      ansible.builtin.set_fact:
+        affected_rules: >-
+          {{ security_rules.gathered | selectattr('schedule', 'in', expiring_schedule_names) | list }}
+
+    - name: Display affected security rules
+      ansible.builtin.debug:
+        msg: |
+          Security Rule: {{ item.name }}
+          Schedule: {{ item.schedule }}
+          Description: {{ item.description | default('No description') }}
+      loop: "{{ affected_rules }}"
+      when: affected_rules is defined and affected_rules | length > 0
+
+    # - name: Send email notification
+    #   community.general.mail:
+    #     host: smtp.example.com
+    #     port: 587
+    #     username: "{{ smtp_user }}"
+    #     password: "{{ smtp_pass }}"
+    #     to: "{{ admin_email }}"
+    #     subject: "PAN-OS Security Rules with Expiring Schedules"
+    #     body: |
+    #       The following schedule objects are expiring within 7 days:
+          
+    #       {% for schedule in expiring_schedules %}
+    #       Schedule Object:
+    #       - Name: {{ schedule.name }}
+    #         End Date: {{ (schedule.non_recurring_date_time.split('-')[1]).split('@')[0] }}
+          
+    #       Affected Security Rules:
+    #       {% for rule in affected_rules %}
+    #       {% if rule.schedule == schedule.name %}
+    #       - Rule Name: {{ rule.name }}
+    #         Description: {{ rule.description | default('No description') }}
+    #       {% endif %}
+    #       {% endfor %}
+          
+    #       {% endfor %}
+    #   when: affected_rules is defined and affected_rules | length > 0
