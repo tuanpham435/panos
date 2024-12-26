@@ -44,8 +44,8 @@
 
     - name: Display expiring schedules
       ansible.builtin.debug:
-        var: expiring_schedules
-      when: expiring_schedules is defined
+        var: schedule_objects
+      when: schedule_objects is defined
 
     - name: Get expiring schedule names
       ansible.builtin.set_fact:
@@ -75,5 +75,5 @@
 
     - name: Display affected rules
       ansible.builtin.debug:
-        var: affected_rules_by_schedule
-      when: affected_rules_by_schedule is defined
+        var: security_rules
+      when: security_rules is defined
