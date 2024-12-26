@@ -58,7 +58,7 @@
         state: "gathered"
         gathered_filter: '*'
       register: security_rules
-      when: expiring_schedule_names is defined and expiring_schedule_names | length > 0
+      # when: expiring_schedule_names is defined and expiring_schedule_names | length > 0
 
     - name: Process affected rules
       ansible.builtin.template:
