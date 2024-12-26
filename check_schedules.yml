@@ -10,7 +10,7 @@
       username: "{{ username }}"
       password: "{{ password }}"
     warning_days: 7
-    debug_mode: true  # Thêm mode debug để dễ troubleshoot
+    debug_mode: false
       
   tasks:
     - name: Get current date and warning date
