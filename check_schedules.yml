@@ -25,11 +25,13 @@
         gathered_filter: '*'
       register: security_rules
 
-    - name: Display affected security rules
+    - name: Display Schedule
       ansible.builtin.debug:
-        msg: |
-          Schedule: {{ schedule_objects }}
-          Security Rule: {{ security_rules }}
+        var: schedule_objects.gathered
+
+    - name: Display Security Rule
+      ansible.builtin.debug:
+        var: security_rules.gathered
 
     # - name: Send email notification
     #   community.general.mail:
