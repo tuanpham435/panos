@@ -71,3 +71,8 @@
         msg: "Affected rule: {{ item }}"
       loop: "{{ affected_rules | default([]) }}"
       when: affected_rules is defined and affected_rules | length > 0
+      
+    - name: Show message when no rules are affected
+      debug:
+        msg: "No security rules are affected by expiring schedules in the next {{ warning_days }} days."
+      when: not affected_rules is defined or affected_rules | length == 0
