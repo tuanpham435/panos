@@ -12,6 +12,9 @@ Associated Schedule Objects:
 {% endfor %}
 
 Please review and update these rules if needed.
+{% else %}
+No security rules are affected by expiring schedules in the next {{ warning_days }} days.
+{% endif %}
 
 ---
 This is an automated message from PAN-OS Security Rules Monitor
