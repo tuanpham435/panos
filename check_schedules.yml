@@ -32,48 +32,36 @@
              selectattr('non_recurring_date_time', 'defined') | 
              list }}
 
-    - name: Extract all datetime ranges
+    - name: Find expiring schedules
       set_fact:
-        all_schedules_dates: >-
-          {{ non_recurring_schedules | 
-             map(attribute='non_recurring_date_time') | 
-             flatten | select('match', '.*-.*@.*') | 
-             list }}
-
-    - name: Process end dates within warning period
-      set_fact:
-        expiring_dates: |
+        expiring_schedules: |
           {% set result = [] %}
-          {% for datetime in all_schedules_dates %}
-            {% set end_date = datetime.split('-')[1].split('@')[0] %}
-            {% if end_date >= current_date and end_date <= warning_date %}
-              {% set _ = result.append(end_date) %}
-            {% endif %}
+          {% for schedule in non_recurring_schedules %}
+            {% for datetime in schedule.non_recurring_date_time %}
+              {% set end_date = datetime.split('-')[1].split('@')[0] %}
+              {% if end_date >= current_date and end_date <= warning_date %}
+                {% if schedule.name not in result %}
+                  {{ result.append(schedule.name) }}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
           {% endfor %}
           {{ result }}
 
-    - name: Find schedules with expiring dates
-      set_fact:
-        expiring_schedules: >-
-          {{ non_recurring_schedules |
-             selectattr('non_recurring_date_time', 'contains', expiring_dates) |
-             map(attribute='name') |
-             list }}
-
-    - name: Gather security rules when expiring schedules exist
+    - name: Gather security rules
       paloaltonetworks.panos.panos_security_rule:
         provider: "{{ provider }}"
         state: "gathered"
         gathered_filter: '*'
       register: security_rules
-      when: expiring_schedules | length > 0
+      when: expiring_schedules|from_yaml|length > 0
 
     - name: Find affected rules
       set_fact:
         affected_rules: >-
           {{ security_rules.gathered | 
              selectattr('schedule', 'defined') |
-             selectattr('schedule', 'in', expiring_schedules) |
+             selectattr('schedule', 'in', expiring_schedules|from_yaml) |
              map(attribute='rule_name') |
              list }}
       when: security_rules is defined and security_rules.gathered is defined
