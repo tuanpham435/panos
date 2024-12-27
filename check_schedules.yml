@@ -17,20 +17,12 @@
         current_date: "{{ lookup('pipe', 'date +%Y/%m/%d') }}"
         warning_date: "{{ lookup('pipe', 'date -d \"+{{ warning_days }} days\" +%Y/%m/%d') }}"
 
-    - name: Gather schedule objects
+    - name: Gather non-recurring schedule objects
       paloaltonetworks.panos.panos_schedule_object:
         provider: "{{ provider }}"
         state: "gathered"
-        gathered_filter: '*'
-      register: schedule_objects
-
-    - name: Filter non-recurring schedules
-      set_fact:
-        non_recurring_schedules: >-
-          {{ schedule_objects.gathered | 
-             selectattr('type', 'equalto', 'non-recurring') | 
-             selectattr('non_recurring_date_time', 'defined') | 
-             list }}
+        gathered_filter: 'type == "non-recurring" and non_recurring_date_time is-not-none'
+      register: non_recurring_schedules
 
     - name: Find expiring schedules
       set_fact:
@@ -71,7 +63,7 @@
         msg: "Security Rule: {{ item }}"
       loop: "{{ affected_rules | default([]) }}"
       when: affected_rules is defined and affected_rules | length > 0
-      
+
     - name: Show message when no rules are affected
       debug:
         msg: "No security rules are affected by expiring schedules in the next {{ warning_days }} days."
