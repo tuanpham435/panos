@@ -10,6 +10,22 @@
       username: "{{ username }}"
       password: "{{ password }}"
     warning_days: 7
+    smtp_port: 587
+    
+  pre_tasks:
+    - name: Verify required variables
+      assert:
+        that:
+          - ip_address is defined
+          - username is defined
+          - password is defined
+          - smtp_host is defined
+          - smtp_port is defined
+          - smtp_username is defined
+          - smtp_password is defined
+          - mail_from is defined
+          - mail_to is defined
+        fail_msg: "Missing required variables. Please define all required variables."
       
   tasks:
     - name: Get current date and warning date
@@ -58,20 +74,22 @@
              list }}
       when: security_rules is defined and security_rules.gathered is defined
       
-    - name: Set empty affected rules if none found
-      set_fact:
-        affected_rules: []
-      when: not affected_rules is defined
-      
-    - name: Check if rules are affected
-      assert:
-        that:
-          - affected_rules | length > 0
-        fail_msg: "No security rules are affected by expiring schedules from {{ current_date }} to {{ warning_date }} (next {{ warning_days }} days)."
-        success_msg: "Found {{ affected_rules | length }} affected rules"
-
-    - name: Show affected rules
-      debug:
-        msg: "Security Rule: {{ item }}"
-      loop: "{{ affected_rules | default([]) }}"
+    - name: Notify expiring rules
       when: affected_rules is defined and affected_rules | length > 0
+      block:
+        - name: Show affected rules
+          debug:
+            msg: "Security Rule: {{ item }}"
+          loop: "{{ affected_rules | default([]) }}"
+      
+        - name: Send email notification
+          ansible.builtin.mail:
+            host: "{{ smtp_host }}"
+            port: "{{ smtp_port }}"
+            username: "{{ smtp_username }}"
+            password: "{{ smtp_password }}"
+            from: "{{ mail_from }}"
+            to: "{{ mail_to }}"
+            subject: "PAN-OS Security Rules Expiration Warning"
+            body: "{{ lookup('template', 'templates/mail_expiring_rules.j2') }}"
+            secure: always

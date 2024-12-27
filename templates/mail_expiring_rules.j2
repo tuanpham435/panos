@@ -1,0 +1,18 @@
+The following security rules have schedules that will expire between {{ current_date }} and {{ warning_date }}:
+
+{% if affected_rules is defined and affected_rules | length > 0 %}
+Affected Rules:
+{% for rule in affected_rules %}
+- {{ rule }}
+{% endfor %}
+
+Associated Schedule Objects:
+{% for schedule in expiring_schedules|from_yaml %}
+- {{ schedule }}
+{% endfor %}
+
+Please review and update these rules if needed.
+
+---
+This is an automated message from PAN-OS Security Rules Monitor
+Do not reply to this email.
