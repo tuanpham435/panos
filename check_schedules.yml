@@ -58,10 +58,14 @@
              list }}
       when: security_rules is defined and security_rules.gathered is defined
       
+    - name: Set empty affected rules if none found
+      set_fact:
+        affected_rules: []
+      when: not affected_rules is defined
+      
     - name: Check if rules are affected
       assert:
-        that: 
-          - affected_rules is defined
+        that:
           - affected_rules | length > 0
         fail_msg: "No security rules are affected by expiring schedules from {{ current_date }} to {{ warning_date }} (next {{ warning_days }} days)."
         success_msg: "Found {{ affected_rules | length }} affected rules"
