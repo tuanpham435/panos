@@ -14,7 +14,7 @@
     
   pre_tasks:
     - name: Verify required variables
-      assert:
+      ansible.builtin.assert:
         that:
           - ip_address is defined
           - username is defined
@@ -41,7 +41,7 @@
       register: non_recurring_schedules
 
     - name: Find expiring schedules
-      set_fact:
+      ansible.builtin.set_fact:
         expiring_schedules: |
           {% set result = [] %}
           {% for schedule in non_recurring_schedules.gathered %}
@@ -65,7 +65,7 @@
       when: expiring_schedules|from_yaml|length > 0
 
     - name: Find affected rules
-      set_fact:
+      ansible.builtin.set_fact:
         affected_rules: >-
           {{ security_rules.gathered | 
              selectattr('schedule', 'defined') |
@@ -78,12 +78,12 @@
       when: affected_rules is defined and affected_rules | length > 0
       block:
         - name: Show affected rules
-          debug:
+          ansible.builtin.debug:
             msg: "Security Rule: {{ item }}"
           loop: "{{ affected_rules | default([]) }}"
       
         - name: Send email notification
-          ansible.builtin.mail:
+          community.general.mail:
             host: "{{ smtp_host }}"
             port: "{{ smtp_port }}"
             username: "{{ smtp_username }}"
@@ -92,4 +92,4 @@
             to: "{{ mail_to }}"
             subject: "PAN-OS Security Rules Expiration Warning"
             body: "{{ lookup('template', 'templates/mail_expiring_rules.j2') }}"
-            secure: always
+          delegate_to: localhost
