@@ -57,14 +57,17 @@
              map(attribute='rule_name') |
              list }}
       when: security_rules is defined and security_rules.gathered is defined
+      
+    - name: Check if rules are affected
+      assert:
+        that: 
+          - affected_rules is defined
+          - affected_rules | length > 0
+        fail_msg: "No security rules are affected by expiring schedules from {{ current_date }} to {{ warning_date }} (next {{ warning_days }} days)."
+        success_msg: "Found {{ affected_rules | length }} affected rules"
 
     - name: Show affected rules
       debug:
         msg: "Security Rule: {{ item }}"
       loop: "{{ affected_rules | default([]) }}"
       when: affected_rules is defined and affected_rules | length > 0
-
-    - name: Show message when no rules are affected
-      debug:
-        msg: "No security rules are affected by expiring schedules from {{ current_date }} to {{ warning_date }} (next {{ warning_days }} days)."
-      when: not affected_rules is defined or affected_rules | length == 0
