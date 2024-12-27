@@ -66,5 +66,5 @@
 
     - name: Show message when no rules are affected
       debug:
-        msg: "No security rules are affected by expiring schedules in the next {{ warning_days }} days."
+        msg: "No security rules are affected by expiring schedules from {{ current_date }} to {{ warning_date }} (next {{ warning_days }} days)."
       when: not affected_rules is defined or affected_rules | length == 0
