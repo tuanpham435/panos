@@ -40,25 +40,24 @@
              flatten | select('match', '.*-.*@.*') | 
              list }}
 
-    - name: Extract and filter end dates
+    - name: Process end dates within warning period
       set_fact:
-        end_dates: >-
-          {{ all_schedules_dates |
-             map('split', '-') |
-             map('last') |
-             map('split', '@') |
-             map('first') |
-             select('greaterthan_equal', current_date) |
-             select('lessthan_equal', warning_date) |
-             list }}
+        expiring_dates: |
+          {% set result = [] %}
+          {% for datetime in all_schedules_dates %}
+            {% set end_date = datetime.split('-')[1].split('@')[0] %}
+            {% if end_date >= current_date and end_date <= warning_date %}
+              {% set _ = result.append(end_date) %}
+            {% endif %}
+          {% endfor %}
+          {{ result }}
 
-    - name: Get schedules with expiring dates
+    - name: Find schedules with expiring dates
       set_fact:
         expiring_schedules: >-
           {{ non_recurring_schedules |
-             selectattr('non_recurring_date_time', 'contains', end_dates) |
+             selectattr('non_recurring_date_time', 'contains', expiring_dates) |
              map(attribute='name') |
-             unique |
              list }}
 
     - name: Gather security rules when expiring schedules exist
