@@ -68,7 +68,7 @@
 
     - name: Show affected rules
       debug:
-        msg: "Rule: {{ item }}"
+        msg: "Security Rule: {{ item }}"
       loop: "{{ affected_rules | default([]) }}"
       when: affected_rules is defined and affected_rules | length > 0
       
