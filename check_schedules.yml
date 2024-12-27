@@ -28,7 +28,7 @@
       set_fact:
         expiring_schedules: |
           {% set result = [] %}
-          {% for schedule in non_recurring_schedules %}
+          {% for schedule in non_recurring_schedules.gathered %}
             {% for datetime in schedule.non_recurring_date_time %}
               {% set end_date = datetime.split('-')[1].split('@')[0] %}
               {% if end_date >= current_date and end_date <= warning_date %}
